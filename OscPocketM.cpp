@@ -13,7 +13,16 @@ Project site: https://www.oscillator.se/opensource
 #include "M5.h"
 #include <Preferences.h>
 
-#include <MozziGuts.h>
+// before including Mozzi.h, configure external audio output mode:
+#include "MozziConfigValues.h"  // for named option values
+#define MOZZI_AUDIO_MODE MOZZI_OUTPUT_EXTERNAL_CUSTOM
+#define MOZZI_AUDIO_CHANNELS MOZZI_MONO
+//#define MOZZI_AUDIO_RATE 44100//wont compile
+#define MOZZI_AUDIO_RATE 32768
+#define MOZZI_AUDIO_BITS 16
+#define MOZZI_CONTROL_RATE 256 // Hz, powers of 2 are most reliable
+
+#include <Mozzi.h>
 #include <ADSR.h>
 #include <Oscil.h> // oscillator template
 #include <StateVariable.h>
@@ -25,10 +34,64 @@ Project site: https://www.oscillator.se/opensource
 #include <tables/saw2048_int8.h>
 #include <tables/square_no_alias_2048_int8.h> 
 
+//#include "CircularBuffer.h"
+#include <BluetoothA2DPSource.h>
+
+//#include "AudioTools.h"
+// #include "AudioLibs/A2DPStream.h"
+// #include "AudioLibs/MozziStream.h"
+
 // use #define for CONTROL_RATE, not a constant
-#define CONTROL_RATE 256 // Hz, powers of 2 are most reliable
+//#define CONTROL_RATE 256 // Hz, powers of 2 are most reliable
 
 
+//Failed attempt at using AudioTools
+// const int sample_rate = 44100;
+// AudioInfo info(sample_rate, 2, 16);  // bluetooth requires 44100, stereo, 16 bits
+// BluetoothA2DPSource a2dp_source;
+// MozziStream mozzi;  // audio source
+// const int16_t BYTES_PER_FRAME = 4;
+// // callback used by A2DP to provide the sound data 
+// int32_t get_sound_data(uint8_t* data, int32_t size) {
+//   int32_t result = mozzi.readBytes(data, size);
+//   //LOGI("get_sound_data %d->%d",size, result);
+//   return result;
+// }
+
+// Bluetooth output from example
+// https://github.com/sensorium/Mozzi/blob/master/examples/13.External_Audio_Output/ESP32_Bluetooth/ESP32_Bluetooth.ino
+// devicce to connect to
+#define BLUETOOTH_DEVICE "SHAIBANG" // todo allow selection at startup or via util menu
+#define BLUETOOTH_VOLUME 100
+
+CircularBuffer<AudioOutput> buf;
+void audioOutput(const AudioOutput f) {
+  buf.write(f);
+}
+
+bool canBufferAudioOutput() {
+  return !buf.isFull();
+}
+
+BluetoothA2DPSource a2dp_source;
+const int BT_RATE = 44100;
+const int lag_per_frame = BT_RATE-AUDIO_RATE;
+int lag = 0;
+AudioOutput last_sample;
+
+int32_t get_data_frames(Frame *frame, int32_t frame_count) {
+  for (int i = 0; i < frame_count; ++i) {
+    lag += lag_per_frame;
+    if (lag > BT_RATE) {
+      lag -= BT_RATE;
+    } else {
+      if (!buf.isEmpty()) last_sample = buf.read();
+    }
+    frame[i].channel1 = last_sample.l();
+    frame[i].channel2 = last_sample.r();
+  }
+  return frame_count;
+}
 
 // synths
 
@@ -148,7 +211,7 @@ ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvTomP;
 
 // 1 note = 1/16
 #define MAX_NOTES 32 // max # of notes in sequence
-#define MAX_SEQUENCES 6 // max # of sequences
+#define MAX_SEQUENCES 16 // max # of sequences
 #define MAX_SONG 150 // max # of sequences in song
 
 typedef struct {
@@ -2558,9 +2621,9 @@ void UIHandle()
 void setup()
 {
   M5.begin();
-  M5.Axp.SetSpkEnable(true);
+  // M5.Axp.SetSpkEnable(true);
   gBrightness = 3;
-  M5.Axp.SetLcdVoltage(2500 + gBrightness * 100);
+  // M5.Axp.SetLcdVoltage(2500 + gBrightness * 100);
 
   // splash screen
 
@@ -2788,11 +2851,16 @@ void setup()
   gUtilFrSeq = 0;
   gUtilToSrc = 0;
   gUtilToSeq = 0;
+
+  // Connect to bluetooth
+  a2dp_source.set_auto_reconnect(false);
+  a2dp_source.start(BLUETOOTH_DEVICE, get_data_frames);  
+  a2dp_source.set_volume(BLUETOOTH_VOLUME);
   
   UIDraw();
 
-  startMozzi(CONTROL_RATE);
-  M5.configureTouchScreen();
+  startMozzi(MOZZI_CONTROL_RATE);
+  M5.configureTouchScreen(); // again, since Mozzi reconfigured pin 25 for I2S
 }
 
 
@@ -2954,7 +3022,7 @@ void updateControl()
 
 // MOZZI
 
-AudioOutput_t updateAudio()
+AudioOutput updateAudio()
 {
   int sigSynth = 0;
   

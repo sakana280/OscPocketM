@@ -63,7 +63,7 @@ float M5Stack::getx(){
 void M5Stack::update() {
     // Get touch state
     static bool lastUpdateTouched = false;
-    bool touched = ts.touched();
+    bool touched = ts.tirqTouched() && ts.touched();
     if (touched && !lastUpdateTouched) { // don't raise a new touch event until after last touch is released
         TS_Point p = ts.getPoint();
         // Some very basic auto calibration so it doesn't go out of range
