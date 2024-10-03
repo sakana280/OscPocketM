@@ -1,31 +1,33 @@
 /*
-  
-Project: OscPocketM for M5 Core2
-Description: Beatmaking software using the Mozzi library
-Author: Staffan Melin, staffan.melin@oscillator.se
+OscPocketM for ESP32
+Copyright (C) 2024 Mark Foreman
 License: GNU General Public License v3.0
-Version: 202109
-Project site: https://www.oscillator.se/opensource
 
+Based on OscPocketM version 202109
+Copyright (C) 2021 Staffan Melin
+staffan.melin@oscillator.se, https://www.oscillator.se/opensource
+License: GNU General Public License v3.0
 */
 
 #include <Arduino.h>
 #include "M5.h"
 #include <Preferences.h>
 
-#include <MozziGuts.h>
+#include <MozziConfigValues.h>
+#define MOZZI_COMPATIBILITY_LEVEL MOZZI_COMPATIBILITY_LATEST
+
+#include <Mozzi.h>
 #include <ADSR.h>
 #include <Oscil.h> // oscillator template
 #include <StateVariable.h>
 #include <mozzi_midi.h> // mtof()
-#include <LowPassFilter.h>
+#include <ResonantFilter.h>
 #include <tables/sin2048_int8.h>
 #include <tables/triangle2048_int8.h>
 #include <tables/whitenoise8192_int8.h>
 #include <tables/saw2048_int8.h>
 #include <tables/square_no_alias_2048_int8.h> 
 
-// use #define for CONTROL_RATE, not a constant
 #define CONTROL_RATE 256 // Hz, powers of 2 are most reliable
 
 
@@ -67,13 +69,11 @@ typedef struct {
 
 MSynth gMSynth[SYNTH_MAX];
 
-uint8_t gMSynthGain; // used in updateAudio()
-
-Oscil <SAW2048_NUM_CELLS, AUDIO_RATE> gMSynthOsc[SYNTH_MAX] = {(SAW2048_DATA), (SAW2048_DATA), (SAW2048_DATA)};
-ADSR <CONTROL_RATE, AUDIO_RATE> gMSynthEnv[SYNTH_MAX];
+Oscil <SAW2048_NUM_CELLS, MOZZI_AUDIO_RATE> gMSynthOsc[SYNTH_MAX] = {(SAW2048_DATA), (SAW2048_DATA), (SAW2048_DATA)};
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMSynthEnv[SYNTH_MAX];
 LowPassFilter gMSynthLpf[SYNTH_MAX];
 // oscillator 2
-Oscil <SAW2048_NUM_CELLS, AUDIO_RATE> gMSynthOsc2[SYNTH_MAX] = {(SAW2048_DATA), (SAW2048_DATA), (SAW2048_DATA)};
+Oscil <SAW2048_NUM_CELLS, MOZZI_AUDIO_RATE> gMSynthOsc2[SYNTH_MAX] = {(SAW2048_DATA), (SAW2048_DATA), (SAW2048_DATA)};
 
 
 
@@ -111,27 +111,27 @@ MDrum gMDrumClap;
 MDrum gMDrumTom;
 
 // oscillators
-Oscil <SIN2048_NUM_CELLS, AUDIO_RATE> gMDOscKick(SIN2048_DATA);
-Oscil <SIN2048_NUM_CELLS, AUDIO_RATE> gMDOscSnare(SIN2048_DATA);
-Oscil <WHITENOISE8192_NUM_CELLS, AUDIO_RATE> gMDOscSnareN(WHITENOISE8192_DATA);
-Oscil <WHITENOISE8192_NUM_CELLS, AUDIO_RATE> gMDOscHHON(WHITENOISE8192_DATA);
-//Oscil <WHITENOISE8192_NUM_CELLS, AUDIO_RATE> gMDOscHHCN(WHITENOISE8192_DATA);
-Oscil <WHITENOISE8192_NUM_CELLS, AUDIO_RATE> gMDOscClapN(WHITENOISE8192_DATA);
-Oscil <TRIANGLE2048_NUM_CELLS, AUDIO_RATE> gMDOscTom(TRIANGLE2048_DATA);
+Oscil <SIN2048_NUM_CELLS, MOZZI_AUDIO_RATE> gMDOscKick(SIN2048_DATA);
+Oscil <SIN2048_NUM_CELLS, MOZZI_AUDIO_RATE> gMDOscSnare(SIN2048_DATA);
+Oscil <WHITENOISE8192_NUM_CELLS, MOZZI_AUDIO_RATE> gMDOscSnareN(WHITENOISE8192_DATA);
+Oscil <WHITENOISE8192_NUM_CELLS, MOZZI_AUDIO_RATE> gMDOscHHON(WHITENOISE8192_DATA);
+//Oscil <WHITENOISE8192_NUM_CELLS, MOZZI_AUDIO_RATE> gMDOscHHCN(WHITENOISE8192_DATA);
+Oscil <WHITENOISE8192_NUM_CELLS, MOZZI_AUDIO_RATE> gMDOscClapN(WHITENOISE8192_DATA);
+Oscil <TRIANGLE2048_NUM_CELLS, MOZZI_AUDIO_RATE> gMDOscTom(TRIANGLE2048_DATA);
 
 // filters
 StateVariable <HIGHPASS> gMDFilterHHO;
 
 // envelopes
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvKickA;
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvKickP;
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvSnareA;
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvSnareP;
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvHHOA;
-//ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvHHCA;
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvClapA;
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvTomA;
-ADSR <CONTROL_RATE, AUDIO_RATE> gMEnvTomP;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvKickA;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvKickP;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvSnareA;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvSnareP;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvHHOA;
+//ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvHHCA;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvClapA;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvTomA;
+ADSR <CONTROL_RATE, MOZZI_AUDIO_RATE> gMEnvTomP;
 
 
 
@@ -2792,7 +2792,7 @@ void setup()
   UIDraw();
 
   startMozzi(CONTROL_RATE);
-  M5.configureTouchScreen();
+  // M5.configureTouchScreen();
 }
 
 
@@ -2954,7 +2954,7 @@ void updateControl()
 
 // MOZZI
 
-AudioOutput_t updateAudio()
+AudioOutput updateAudio()
 {
   int sigSynth = 0;
   
@@ -2971,7 +2971,7 @@ AudioOutput_t updateAudio()
 
     for (uint8_t i = 0; i < SYNTH_MAX; i++)
     {
-      gMSynthGain = gMSynthEnv[i].next(); 
+      uint8_t gMSynthGain = gMSynthEnv[i].next(); 
 
       if (gMSynth[i].gMWaveform2 == WAVEFORM_NONE) {
         sigSynth += gMSynthLpf[i].next((gMSynthGain * gMSynthOsc[i].next()) >> gMixer.mixSynth[i]);        
